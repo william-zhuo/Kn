@@ -1,492 +1,262 @@
 import pygame
+import sys
 import random
-import math
 
-# Initialize Pygame
 pygame.init()
-
-# Constants
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
-FPS = 60
-
-# Colors
-BLACK = (0, 0, 0)
+SCR_WIDTH = 1200
+SCR_HEIGHT = 600
 WHITE = (255, 255, 255)
-LIGHT_GREY = (100, 100, 100)
-GREY = (128, 128, 128)
-LIGHTER_GREY = (180, 180, 180)  # For starting platform
-RED = (255, 0, 0)
-ORANGE = (255, 165, 0)
-BLUE = (0, 100, 255)
+screen = pygame.display.set_mode((SCR_WIDTH, SCR_HEIGHT))
+pygame.display.set_caption("Platformer")
+clock = pygame.time.Clock()
 
-# Player constants
-PLAYER_SIZE = 20
-PLAYER_SPEED = 5
-JUMP_STRENGTH = 12
-GRAVITY = 0.5
-MAX_FALL_SPEED = 15
+GRAV = 0.9
+SCROLLSPEED = 4
+begin_game = True
 
-class Star:
-    def __init__(self):
-        self.x = random.randint(0, SCREEN_WIDTH)
-        self.y = random.randint(0, SCREEN_HEIGHT)
-        self.speed = random.uniform(0.5, 2)
-        self.size = random.randint(1, 3)
-    
-    def update(self):
-        self.y += self.speed
-        if self.y > SCREEN_HEIGHT:
-            self.y = -10
-            self.x = random.randint(0, SCREEN_WIDTH)
-    
-    def draw(self, screen):
-        pygame.draw.circle(screen, LIGHT_GREY, (int(self.x), int(self.y)), self.size)
+back_bound = pygame.Rect(0, 0, 5, SCR_HEIGHT)
+floor_bound = pygame.Rect(0, SCR_HEIGHT - 5, SCR_WIDTH, 5)
 
-class Player:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.vel_x = 0
-        self.vel_y = 0
-        self.on_ground = False
-        self.can_wall_jump = True
-        self.can_double_jump = True
-        self.wall_jump_timer = 0
+all_plat = []
+all_enembox = [back_bound, floor_bound]
+
+menu_open = False
+
+
+sprite_Kn_Body = pygame.image.load("Kn_Body.png").convert_alpha()
+sprite_Kn_Heart = pygame.image.load("Kn_Heart.png").convert_alpha()
+sprite_Kn_Invinc = pygame.image.load("Kn_Invinc.png").convert_alpha()
+
+
+def get_image(sheet, frame, w, h, scale, colour):
+    image = pygame.Surface((w, h)).convert_alpha()
+    image.blit(sheet, (0, 0), ((frame*w), 0, w, h))
+    image = pygame.transform.scale(image, (w*scale, h*scale))
+    image.set_colorkey(colour)
+
+    return image
+
+class Kn:
+    def __init__(self, scroll_speed):
+        self.on_plat = False
+        self.scroll_v = scroll_speed
+        self.fall_sky = True
+
+        self.x = 500
+        self.dx = 0
+        self.accel_x = 0
+        self.max_dx = 10
+
+        self.y = 0
+        self.dy = 3
+        self.max_dy = 18
+
+        self.jump_charge = 0
+        self.max_jump_charge = 20
+
+        self.w = 50
+        self.h = 100
+
+        self.hitbox = pygame.Rect(0, 0, 0, 0)
+        self.chargebox = pygame.Rect(0, 0, 0, 0)
+
+        self.lives = 5
+        self.invinc = 0
+        self.invinc_ticks = 60
+
+    def check_on_plat(self):
+        global all_plat
+        for plat in all_plat:
+            if pygame.Rect.colliderect(self.hitbox, plat):
+                if self.y + self.h < plat.y + 20:
+                    self.on_plat = True
+                    self.y = plat.y - self.h + 1
+                    break
+                else:
+                    self.dx = 0
+            else:
+                self.on_plat = False
+
+    def move(self):
+        if -1 * self.max_dx <= self.dx + self.accel_x <= self.max_dx:
+            self.dx += self.accel_x
+        if self.accel_x == 0:
+            self.dx *= 0.9
+            if -1.5 < self.dx < 1.5:
+                self.dx = 0
+        self.x += self.dx - self.scroll_v
+
+        if self.x < 4:
+            self.x = 4
         
-    def update(self, platforms):
-        # Handle input
-        keys = pygame.key.get_pressed()
-        
-        # Initialize jump_pressed if it doesn't exist
-        if not hasattr(self, 'jump_pressed'):
-            self.jump_pressed = False
-        
-        # Horizontal movement
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.vel_x = -PLAYER_SPEED
-        elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.vel_x = PLAYER_SPEED
+        if self.jump_charge > self.max_jump_charge:
+            self.jump_charge = self.max_jump_charge
+
+        if not self.on_plat:
+            self.dy += GRAV
+            if self.dy > -2:
+                self.dy *= 1.02
+            if -0.09 < self.dy < 0.09:
+                self.dy = 0
+        if self.dy > self.max_dy:
+            self.dy = self.max_dy
+        if (not self.on_plat) or self.dy < 0:
+            self.y += self.dy
         else:
-            self.vel_x *= 0.8  # Friction
-        
-        # Jumping - only trigger on key press, not key hold
-        jump_key_pressed = keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]
-        
-        if jump_key_pressed and not self.jump_pressed:
-            self.jump_pressed = True
-            if self.on_ground:
-                # Ground jump
-                self.vel_y = -JUMP_STRENGTH
-                self.can_double_jump = True
-                self.on_ground = False
-            elif self.can_double_jump:
-                # Double jump
-                self.vel_y = -JUMP_STRENGTH
-                self.can_double_jump = False
-            elif self.can_wall_jump and self.wall_jump_timer <= 0:
-                # Check for wall jump
-                wall_left = self.check_wall_collision(platforms, -5, 0)
-                wall_right = self.check_wall_collision(platforms, 5, 0)
-                if wall_left or wall_right:
-                    self.vel_y = -JUMP_STRENGTH
-                    self.vel_x = PLAYER_SPEED * 2 if wall_left else -PLAYER_SPEED * 2
-                    self.can_wall_jump = False
-                    self.wall_jump_timer = 10
-        elif not jump_key_pressed:
-            self.jump_pressed = False
-        
-        # Wall jump timer
-        if self.wall_jump_timer > 0:
-            self.wall_jump_timer -= 1
-        
-        # Apply gravity
-        self.vel_y += GRAVITY
-        if self.vel_y > MAX_FALL_SPEED:
-            self.vel_y = MAX_FALL_SPEED
-        
-        # Move horizontally
-        self.x += self.vel_x
-        if self.x < 0:
-            self.x = 0
-        elif self.x > SCREEN_WIDTH - PLAYER_SIZE:
-            self.x = SCREEN_WIDTH - PLAYER_SIZE
-        
-        # Check horizontal collisions
-        if self.check_collision(platforms):
-            self.x -= self.vel_x
-            self.vel_x = 0
-        
-        # Move vertically
-        self.y += self.vel_y
-        
-        # Check vertical collisions
-        old_on_ground = self.on_ground
-        self.on_ground = False
-        
-        if self.check_collision(platforms):
-            if self.vel_y > 0:  # Falling
-                # Land on platform
-                self.y -= self.vel_y
-                while self.check_collision(platforms):
-                    self.y -= 1
-                self.vel_y = 0
-                self.on_ground = True
-                # Reset abilities when landing
-                if not old_on_ground:
-                    self.can_wall_jump = True
-                    self.can_double_jump = True
-            else:  # Moving up (hit ceiling)
-                self.y -= self.vel_y
-                while self.check_collision(platforms):
-                    self.y += 1
-                self.vel_y = 0
-    
-    def check_collision(self, platforms):
-        player_rect = pygame.Rect(self.x, self.y, PLAYER_SIZE, PLAYER_SIZE)
-        for platform in platforms:
-            if player_rect.colliderect(platform):
-                return True
-        return False
-    
-    def check_wall_collision(self, platforms, offset_x, offset_y):
-        player_rect = pygame.Rect(self.x + offset_x, self.y + offset_y, PLAYER_SIZE, PLAYER_SIZE)
-        for platform in platforms:
-            if player_rect.colliderect(platform):
-                return True
-        return False
-    
-    def draw(self, screen):
-        pygame.draw.rect(screen, WHITE, (self.x, self.y, PLAYER_SIZE, PLAYER_SIZE))
+            self.dy = 0
 
-class Projectile:
-    def __init__(self, x, y, vel_x, vel_y, color):
-        self.x = x
-        self.y = y
-        self.vel_x = vel_x
-        self.vel_y = vel_y
-        self.color = color
-        self.size = 6
-    
+        if self.fall_sky:
+            if self.y >= SCR_HEIGHT:
+                self.y = 0 - self.h - 50
+
     def update(self):
-        self.x += self.vel_x
-        self.y += self.vel_y
-    
-    def draw(self, screen):
-        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.size)
-    
-    def is_off_screen(self):
-        return (self.x < -20 or self.x > SCREEN_WIDTH + 20 or 
-                self.y < -20 or self.y > SCREEN_HEIGHT + 20)
+        global all_enembox
+        for box in all_enembox:
+            if pygame.Rect.colliderect(self.hitbox, box) and self.invinc == 0:
+                self.lives -= 1
+                self.invinc = self.invinc_ticks
+                break
+        if self.invinc > 0:
+            self.invinc -= 1
 
-class Cannon:
-    def __init__(self, x, y, cannon_type="normal"):
-        self.x = x
-        self.y = y
-        self.cannon_type = cannon_type
-        self.shoot_timer = 0
-        self.angle = 0 if cannon_type == "normal" else random.uniform(0, 2 * math.pi)
-        self.turn_speed = 0.02 if cannon_type == "homing" else 0
-    
-    def update(self, player, projectiles):
-        self.shoot_timer += 1
-        
-        if self.cannon_type == "homing":
-            # Slowly turn towards player
-            target_angle = math.atan2(player.y - self.y, player.x - self.x)
-            angle_diff = target_angle - self.angle
-            # Normalize angle difference
-            while angle_diff > math.pi:
-                angle_diff -= 2 * math.pi
-            while angle_diff < -math.pi:
-                angle_diff += 2 * math.pi
-            
-            self.angle += angle_diff * self.turn_speed
-        
-        # Shoot projectiles
-        shoot_interval = 90 if self.cannon_type == "homing" else 60
-        if self.shoot_timer >= shoot_interval:
-            self.shoot_timer = 0
-            speed = 5 if self.cannon_type == "homing" else 7  # Increased speeds
-            
-            if self.cannon_type == "normal":
-                # Shoot towards player
-                dx = player.x - self.x
-                dy = player.y - self.y
-                dist = math.sqrt(dx*dx + dy*dy)
-                if dist > 0:
-                    vel_x = (dx / dist) * speed
-                    vel_y = (dy / dist) * speed
-                    projectiles.append(Projectile(self.x, self.y, vel_x, vel_y, ORANGE))
-            else:  # homing
-                vel_x = math.cos(self.angle) * speed
-                vel_y = math.sin(self.angle) * speed
-                projectiles.append(Projectile(self.x, self.y, vel_x, vel_y, BLUE))
-    
-    def draw(self, screen):
-        color = ORANGE if self.cannon_type == "normal" else BLUE
-        pygame.draw.rect(screen, color, (self.x - 8, self.y - 8, 16, 16))
-        
-        # Draw barrel
-        barrel_length = 15
-        end_x = self.x + math.cos(self.angle) * barrel_length
-        end_y = self.y + math.sin(self.angle) * barrel_length
-        pygame.draw.line(screen, color, (self.x, self.y), (end_x, end_y), 3)
+    def draw(self):
+        self.hitbox = pygame.Rect(self.x, self.y, self.w, self.h)
+        pygame.draw.rect(screen, (255, 0, 0), self.hitbox, 5)
 
-class LevelGenerator:
-    def __init__(self):
+        self.chargebox = pygame.Rect(self.x, self.y - 30, self.jump_charge * 2.5, 10)
+        pygame.draw.rect(screen, (0, 0, 255), self.chargebox)
+
+        screen.blit(Kn_Body, (self.x + 13, self.y))
+
+        if self.invinc > 0:
+            screen.blit(Kn_Invinc, (self.x - 10, self.y))
+
+class PlatformGenerator:
+    def __init__(self, scroll_speed):
         self.platforms = []
-        self.starting_platform = []
-        self.lava_blocks = []
-        self.cannons = []
-        self.world_y = 0
-        self.last_platform_y = SCREEN_HEIGHT - 100
-        self.generate_initial_level()
-    
-    def generate_initial_level(self):
-        # Generate starting platform (always the same size and position)
-        start_platform_width = 200
-        start_platform_x = (SCREEN_WIDTH - start_platform_width) // 2
-        start_platform_y = SCREEN_HEIGHT - 50
         
-        for i in range(0, start_platform_width, 20):
-            self.starting_platform.append(pygame.Rect(start_platform_x + i, start_platform_y, 20, 20))
+        self.p_width = SCR_WIDTH - 200
+        self.p_height = 20
+        self.speed = scroll_speed
+        self.spacing = 70
         
-        # Set last platform y to be above the starting platform
-        self.last_platform_y = start_platform_y - 150
-        
-        # Generate initial platforms above starting platform
-        for i in range(10):
-            self.generate_platform_section()
-    
-    def generate_platform_section(self):
-        y = self.last_platform_y - random.randint(80, 150)
-        
-        # Generate platform pattern
-        pattern = random.choice(['straight', 'gap', 'zigzag', 'tower'])
-        
-        if pattern == 'straight':
-            width = random.randint(200, 400)
-            x = random.randint(0, SCREEN_WIDTH - width)
-            for i in range(0, width, 20):
-                self.platforms.append(pygame.Rect(x + i, y, 20, 20))
-        
-        elif pattern == 'gap':
-            # Platform with gap in middle
-            left_width = random.randint(80, 150)
-            gap_width = random.randint(60, 120)
-            right_width = random.randint(80, 150)
-            
-            x = random.randint(0, SCREEN_WIDTH - left_width - gap_width - right_width)
-            
-            # Left platform
-            for i in range(0, left_width, 20):
-                self.platforms.append(pygame.Rect(x + i, y, 20, 20))
-            
-            # Right platform
-            for i in range(0, right_width, 20):
-                self.platforms.append(pygame.Rect(x + left_width + gap_width + i, y, 20, 20))
-        
-        elif pattern == 'zigzag':
-            # Zigzag pattern
-            x = random.randint(100, SCREEN_WIDTH - 300)
-            for i in range(3):
-                offset = (i % 2) * 100
-                for j in range(0, 80, 20):
-                    self.platforms.append(pygame.Rect(x + offset + j, y - i * 40, 20, 20))
-        
-        elif pattern == 'tower':
-            # Vertical tower
-            x = random.randint(100, SCREEN_WIDTH - 100)
-            height = random.randint(4, 8)
-            for i in range(height):
-                self.platforms.append(pygame.Rect(x, y + i * 20, 20, 20))
-                self.platforms.append(pygame.Rect(x + 60, y + i * 20, 20, 20))
-        
-        # Add obstacles
-        self.add_obstacles(y)
-        
-        self.last_platform_y = y
-    
-    def add_obstacles(self, y):
-        # Add lava blocks
-        if random.random() < 0.3:
-            lava_x = random.randint(0, SCREEN_WIDTH - 40)
-            for i in range(random.randint(1, 3)):
-                self.lava_blocks.append(pygame.Rect(lava_x + i * 20, y + 20, 20, 20))
-        
-        # Add cannons
-        if random.random() < 0.4:
-            cannon_x = random.randint(20, SCREEN_WIDTH - 20)
-            cannon_type = random.choice(["normal", "homing"])
-            self.cannons.append(Cannon(cannon_x, y - 40, cannon_type))
-    
-    def update(self, camera_y):
-        # Generate new sections as camera moves up
-        while self.last_platform_y > camera_y - SCREEN_HEIGHT:
-            self.generate_platform_section()
-        
-        # Remove old platforms and obstacles
-        cutoff_y = camera_y + SCREEN_HEIGHT + 200
-        self.platforms = [p for p in self.platforms if p.y < cutoff_y]
-        self.lava_blocks = [l for l in self.lava_blocks if l.y < cutoff_y]
-        self.cannons = [c for c in self.cannons if c.y < cutoff_y]
-    
-    def draw(self, screen, camera_y):
-        # Draw starting platform (lighter grey)
-        for platform in self.starting_platform:
-            if platform.y > camera_y - 50 and platform.y < camera_y + SCREEN_HEIGHT + 50:
-                pygame.draw.rect(screen, LIGHTER_GREY, (platform.x, platform.y - camera_y, platform.width, platform.height))
-        
-        # Draw regular platforms
-        for platform in self.platforms:
-            if platform.y > camera_y - 50 and platform.y < camera_y + SCREEN_HEIGHT + 50:
-                pygame.draw.rect(screen, GREY, (platform.x, platform.y - camera_y, platform.width, platform.height))
-        
-        # Draw lava blocks
-        for lava in self.lava_blocks:
-            if lava.y > camera_y - 50 and lava.y < camera_y + SCREEN_HEIGHT + 50:
-                pygame.draw.rect(screen, RED, (lava.x, lava.y - camera_y, lava.width, lava.height))
-        
-        # Draw cannons
-        for cannon in self.cannons:
-            if cannon.y > camera_y - 50 and cannon.y < camera_y + SCREEN_HEIGHT + 50:
-                cannon_screen = Cannon(cannon.x, cannon.y - camera_y, cannon.cannon_type)
-                cannon_screen.angle = cannon.angle
-                cannon_screen.draw(screen)
-
-class Game:
-    def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Pixel Tower")
-        self.clock = pygame.time.Clock()
-        
-        self.player = Player(SCREEN_WIDTH // 2 - PLAYER_SIZE // 2, SCREEN_HEIGHT - 100)
-        self.camera_y = 0
-        self.stars = [Star() for _ in range(50)]
-        self.level_generator = LevelGenerator()
-        self.projectiles = []
-        self.game_over = False
-        self.height_score = 0
-        
-    def handle_events(self):
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r and self.game_over:
-                    self.restart_game()
-        return True
-    
-    def restart_game(self):
-        self.player = Player(SCREEN_WIDTH // 2 - PLAYER_SIZE // 2, SCREEN_HEIGHT - 100)
-        self.camera_y = 0
-        self.level_generator = LevelGenerator()
-        self.projectiles = []
-        self.game_over = False
-        self.height_score = 0
-    
     def update(self):
-        if self.game_over:
-            return
+        global all_plat
+
+        for platform in self.platforms:
+            platform.x -= self.speed
+            
+        self.platforms = [p for p in self.platforms if p.x + p.width > 0]
         
-        # Update player (pass all platforms including starting platform)
-        all_platforms = self.level_generator.platforms + self.level_generator.starting_platform
-        self.player.update(all_platforms)
+        if not self.platforms or self.platforms[-1].x + self.platforms[-1].width <= SCR_WIDTH - self.spacing:
+            self.spawn_platform()
         
-        # Update camera to follow player
-        target_camera_y = self.player.y - SCREEN_HEIGHT * 0.7
-        if target_camera_y < self.camera_y:
-            self.camera_y = target_camera_y
-        
-        # Update height score
-        self.height_score = max(self.height_score, int(-self.camera_y / 10))
-        
-        # Update stars
-        for star in self.stars:
-            star.update()
-        
-        # Update level generator
-        self.level_generator.update(self.camera_y)
-        
-        # Update cannons and projectiles
-        for cannon in self.level_generator.cannons:
-            cannon.update(self.player, self.projectiles)
-        
-        for projectile in self.projectiles[:]:
-            projectile.update()
-            if projectile.is_off_screen():
-                self.projectiles.remove(projectile)
-        
-        # Check collisions
-        self.check_collisions()
-        
-        # Check if player fell off screen
-        if self.player.y > self.camera_y + SCREEN_HEIGHT + 100:
-            self.game_over = True
+        all_plat = self.platforms
     
-    def check_collisions(self):
-        player_rect = pygame.Rect(self.player.x, self.player.y, PLAYER_SIZE, PLAYER_SIZE)
-        
-        # Check lava collision
-        for lava in self.level_generator.lava_blocks:
-            if player_rect.colliderect(lava):
-                self.game_over = True
-                return
-        
-        # Check projectile collision
-        for projectile in self.projectiles[:]:
-            proj_rect = pygame.Rect(projectile.x - projectile.size, projectile.y - projectile.size, 
-                                  projectile.size * 2, projectile.size * 2)
-            if player_rect.colliderect(proj_rect):
-                self.game_over = True
-                return
+    def spawn_platform(self):
+        global begin_game
+        if begin_game:
+            self.platforms.append(pygame.Rect(100, 500, self.p_width, self.p_height))
+            begin_game = False
+
+        y = SCR_HEIGHT - random.randint(50, 250)
+        self.p_width = random.randint(100, 300)
+        self.platforms.append(pygame.Rect(SCR_WIDTH, y, self.p_width, self.p_height))
     
     def draw(self):
-        self.screen.fill(BLACK)
-        
-        # Draw stars
-        for star in self.stars:
-            star.draw(self.screen)
-        
-        # Draw level
-        self.level_generator.draw(self.screen, self.camera_y)
-        
-        # Draw projectiles
-        for projectile in self.projectiles:
-            if projectile.y > self.camera_y - 50 and projectile.y < self.camera_y + SCREEN_HEIGHT + 50:
-                proj_screen = Projectile(projectile.x, projectile.y - self.camera_y, 0, 0, projectile.color)
-                proj_screen.draw(self.screen)
-        
-        # Draw player
-        player_screen_y = self.player.y - self.camera_y
-        pygame.draw.rect(self.screen, WHITE, (self.player.x, player_screen_y, PLAYER_SIZE, PLAYER_SIZE))
-        
-        # Draw UI
-        font = pygame.font.Font(None, 36)
-        height_text = font.render(f"Height: {self.height_score}m", True, WHITE)
-        self.screen.blit(height_text, (10, 10))
-        
-        if self.game_over:
-            game_over_text = font.render("GAME OVER", True, WHITE)
-            restart_text = font.render("Press R to restart", True, WHITE)
-            text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
-            restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 40))
-            self.screen.blit(game_over_text, text_rect)
-            self.screen.blit(restart_text, restart_rect)
-        
-        pygame.display.flip()
-    
-    def run(self):
-        running = True
-        while running:
-            running = self.handle_events()
-            self.update()
-            self.draw()
-            self.clock.tick(FPS)
-        
-        pygame.quit()
+        for platform in self.platforms:
+            pygame.draw.rect(screen, (120, 120, 120), platform)
 
-if __name__ == "__main__":
-    game = Game()
-    game.run()
+class UI:
+    def __init__(self):
+        self.lives = knight.lives
+
+    def disp_lives(self):
+        self.lives = knight.lives
+        for i in range(self.lives):
+            screen.blit(Kn_Heart, (50 + i*50, 30))
+
+class Laser:
+    def __init__(self):
+        self.x = []
+        self.y = []
+        self.rotation = []
+
+
+platforms = PlatformGenerator(SCROLLSPEED)
+knight = Kn(SCROLLSPEED)
+ui = UI()
+
+Kn_Body = get_image(sprite_Kn_Body, 0, 15, 54, 1.5, WHITE)
+Kn_Heart = get_image(sprite_Kn_Heart, 0, 20, 18, 2, WHITE)
+Kn_Invinc = get_image(sprite_Kn_Invinc, 0, 70, 100, 1, WHITE)
+
+running = True
+while running:
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+            break
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                menu_open = True
+                while menu_open:
+
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            running = False
+                            break
+                        if event.type == pygame.KEYDOWN:
+                            if event.key == pygame.K_ESCAPE:
+                                menu_open = False
+                    if running == False:
+                        break
+                    
+                    pygame.draw.rect(screen, (50, 50, 255), (50, 50, SCR_WIDTH - 100, SCR_HEIGHT - 100), 20)
+
+                    pygame.display.flip()
+                    clock.tick(60)
+
+
+        if event.type == pygame.KEYUP and event.key == pygame.K_UP:
+            if knight.on_plat:
+                knight.dy = -8 - knight.jump_charge*0.5
+            knight.jump_charge = 0
+
+
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_UP] and knight.on_plat:
+        knight.jump_charge += 1
+    if keys[pygame.K_LEFT] and keys[pygame.K_RIGHT]:
+        knight.accel_x = 0
+    elif keys[pygame.K_LEFT]:
+        knight.accel_x = -0.9
+    elif keys[pygame.K_RIGHT]:
+        knight.accel_x = 0.9
+    else:
+        knight.accel_x = 0
+
+    
+
+    screen.fill((135, 206, 235))
+
+    pygame.draw.rect(screen, (255, 0, 0), back_bound)
+    pygame.draw.rect(screen, (255, 0, 0), floor_bound)
+
+    ui.disp_lives()
+
+    knight.check_on_plat()
+    knight.move()
+    knight.update()
+    knight.draw()
+
+    platforms.update()
+    platforms.draw()
+
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
+sys.exit()
