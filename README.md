@@ -4,6 +4,7 @@ work in progress.
 
 As of the writing of this readme, this game only consists of:
 - a physics engine (including a jumping mechanism that allows you to charge your jump for greater height)
+- attack mechanism (inc. hitboxes)
 - self-generating platforms
 - a sprite for the main player
 - a health bar
@@ -12,7 +13,5 @@ As of the writing of this readme, this game only consists of:
 - short invincibility period uopn being hit (shown by a forcefield sprite)
 
 Yet to develop:
-- attack mechanism
 - parry mechanism
 - more enemies (and their AI)
-- add to menu (eg toggling show_hitbox)
